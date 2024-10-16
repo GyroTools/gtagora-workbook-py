@@ -19,7 +19,8 @@ authors = [
 maintainers = [
   {name = "Martin Buehrer", email = "martin.buehrer@gyrotools.com" }
 ]
-dependencies = []
+dependencies = [
+]
 
 [project.optional-dependencies]
 dev = []
