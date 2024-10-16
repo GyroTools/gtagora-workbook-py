@@ -1,0 +1,30 @@
+[build-system]
+# A list of packages that are needed to build your package:
+requires = ["setuptools"]
+# The name of the Python object that frontends will use to perform the build:
+build-backend = "setuptools.build_meta"  # If not defined, then legacy behavior can happen.
+
+
+[project]
+name = "gtagora-workbook-py"
+version = "0.0.1"
+description = "Agora workbook utilities"
+readme = "README.md"
+requires-python = ">=3.7"
+license = {file = "LICENSE"}
+keywords = ["gyrotools", "agora", "workbook"]
+authors = [
+  {name = "Martin Buehrer", email = "martin.buehrer@gyrotools.com" }
+]
+maintainers = [
+  {name = "Martin Buehrer", email = "martin.buehrer@gyrotools.com" }
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = []
+test = ["pytest"]
+
+[project.urls]
+"Homepage" = "https://github.com/GyroTools/gtagora-workbook-py"
+"Source" = "https://github.com/GyroTools/gtagora-workbook-py"
