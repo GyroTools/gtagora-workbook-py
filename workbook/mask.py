@@ -1,6 +1,7 @@
 from typing import List
 
 import base64
+import array 
 
 MASK_TYPE_EMPTY = 0
 MASK_TYPE_FILLED = 1
@@ -11,6 +12,27 @@ MASK_TYPE_BYTE_ARRAY = 5
 MASK_TYPE_REGULAR1 = 6
 MASK_TYPE_REGULAR2 = 7
 MASK_TYPE_REGULAR3 = 8
+
+import base64
+
+def compress_slice_rle(encode):
+    values = None
+
+    if len(encode) == 1 and encode[0] == MASK_TYPE_EMPTY:
+        values = bytearray(1)
+        values[0] = MASK_TYPE_EMPTY
+    
+    elif len(encode) == 2 and encode[0] == MASK_TYPE_FILLED:
+        values = bytearray(2)
+        values[0] = MASK_TYPE_FILLED
+        values[1] = encode[1]
+
+    elif len(encode) >= 2 and MASK_TYPE_BITMASK1 <= encode[0] <= MASK_TYPE_REGULAR3:
+        values = bytearray(len(encode))
+        for v_index in range(len(encode)):
+            values[v_index] = encode[v_index]
+
+    return base64.b64encode(bytes(values)).decode('utf-8')
 
 
 def _get_nr_bytes(mask_type):
@@ -33,7 +55,7 @@ def decode_mask(b64mask, length):
         if mask_type == MASK_TYPE_EMPTY:
             return mask
         elif mask_type == MASK_TYPE_FILLED:
-            return [1] * length
+            return [encoded_mask[1]] * length
         elif mask_type == MASK_TYPE_BYTE_ARRAY:
             return list(encoded_mask[1:length + 1])
         elif mask_type in [MASK_TYPE_BITMASK1, MASK_TYPE_BITMASK2, MASK_TYPE_BITMASK3]:
@@ -76,3 +98,123 @@ def decode_mask(b64mask, length):
                 target_index += run_length
 
     return mask
+
+def encode_mask(mask_array):
+
+    v_label_stack = []
+    v_length_stack = []
+    v_index = 0
+    new_mask = None
+
+    while v_index < len(mask_array):
+        v_current_value = mask_array[v_index]
+        v_length = 1
+        v_index += 1
+
+        while v_index < len(mask_array) and mask_array[v_index] == v_current_value:
+            v_index += 1
+            v_length += 1
+        if v_index < len(mask_array) or v_current_value != 0:
+            # do not store trailing 0's
+            v_label_stack.append(v_current_value)
+            v_length_stack.append(v_length)
+
+    v_set = set(v for v in v_label_stack if v != 0)
+    v_max_length = 0
+    for length in v_length_stack[1:]:
+        if length > v_max_length:
+            v_max_length = length
+
+
+    v_length_byte_size = 3
+    if v_max_length < 256:
+        v_length_byte_size = 1
+    elif v_max_length < 65536:
+        v_length_byte_size = 2
+
+    if len(v_label_stack) == 0:
+        # empty mask
+        new_mask = compress_slice_rle([MASK_TYPE_EMPTY])
+    elif len(v_label_stack) == 1 and v_length_stack[0] == len(mask_array):
+        # homogeneous mask
+        new_mask = compress_slice_rle([MASK_TYPE_FILLED, v_label_stack[0]])
+    elif len(v_label_stack) > len(mask_array) / 4:
+        # byte ARRAY
+        new_mask = compress_slice_rle([MASK_TYPE_BYTE_ARRAY] + mask_array)
+    else:
+        if len(v_set) == 1:
+            # bit mask
+            v_first = 0
+            v_label = v_label_stack[0]
+            if v_label_stack[0] == 0:
+                # starts with 0, this is implicit, remove first
+                v_first = v_length_stack.pop(0)
+                v_label = v_label_stack[1]
+
+            if v_length_byte_size == 1:
+                new_mask = compress_slice_rle([
+                    MASK_TYPE_BITMASK1,
+                    v_label,
+                    (v_first >> 16) & 255,
+                    (v_first >> 8) & 255,
+                    v_first & 255,
+                    *v_length_stack
+                ])
+            elif v_length_byte_size == 2:
+                v_length2 = []
+                for v_val in v_length_stack:
+                    v_length2.append((v_val >> 8) & 255)
+                    v_length2.append(v_val & 255)
+                new_mask = compress_slice_rle([
+                    MASK_TYPE_BITMASK2,
+                    v_label,
+                    (v_first >> 16) & 255,
+                    (v_first >> 8) & 255,
+                    v_first & 255,
+                    *v_length2
+                ])
+            elif v_length_byte_size == 3:
+                v_length3 = []
+                for v_val in v_length_stack:
+                    v_length3.append((v_val >> 16) & 255)
+                    v_length3.append((v_val >> 8) & 255)
+                    v_length3.append(v_val & 255)
+                new_mask = compress_slice_rle([
+                    MASK_TYPE_BITMASK3,
+                    v_label,
+                    (v_first >> 16) & 255,
+                    (v_first >> 8) & 255,
+                    v_first & 255,
+                    *v_length3
+                ])
+        else:
+            # normal
+            v_data_array = [
+                v_label_stack[0],
+                (v_length_stack[0] >> 16) & 255,
+                (v_length_stack[0] >> 8) & 255,
+                v_length_stack[0] & 255
+            ]
+
+            if v_length_byte_size == 1:
+                for i in range(1, len(v_label_stack)):
+                    v_data_array.append(v_label_stack[i])
+                    v_data_array.append(v_length_stack[i])
+                new_mask = compress_slice_rle([MASK_TYPE_REGULAR1] + v_data_array)
+            elif v_length_byte_size == 2:
+                for i in range(1, len(v_label_stack)):
+                    v_data_array.append(v_label_stack[i])
+                    v_data_array.append((v_length_stack[i] >> 8) & 255)
+                    v_data_array.append(v_length_stack[i] & 255)
+                new_mask = compress_slice_rle([MASK_TYPE_REGULAR2] + v_data_array)
+            elif v_length_byte_size == 3:
+                for i in range(1, len(v_label_stack)):
+                    v_data_array.append(v_label_stack[i])
+                    v_data_array.append((v_length_stack[i] >> 16) & 255)
+                    v_data_array.append((v_length_stack[i] >> 8) & 255)
+                    v_data_array.append(v_length_stack[i] & 255)
+                new_mask = compress_slice_rle([MASK_TYPE_REGULAR3] + v_data_array)
+
+    return new_mask
+
+
